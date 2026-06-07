@@ -1066,10 +1066,7 @@
             healthy++;
             // امتیاز برای تعمیر پنل
             score += (currentMode === "hard" ? 25 : currentMode === "normal" ? 18 : 12);
-            // در Hard کمی زمان اضافه شود
-            if (currentMode === "hard") {
-                time = Math.min(time + 2, TIME);
-            }
+           
             updateUI();
             playSound("repair");
             spawnParticlesForCell(c);
