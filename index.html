@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta 
+        name="viewport" 
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    >
+    <title>Jazz & Kabby: Solar Roof Defense</title>
+    <style>
+        body {
+            font-family: Tahoma, Arial, sans-serif;
+            text-align: center;
+            background-color: #222; /* برای کنتراست بهتر با roof_bg */
+            margin: 0;
+        }
+
+        #game-container {
+            max-width: 500px;
+            margin: 0 auto;
+            padding: 10px;
+            background: #f0f3f6;
+            min-height: 100vh;
+            box-sizing: border-box;
+        }
+
+        h2 {
+            margin-top: 10px;
+            margin-bottom: 5px;
+        }
+
+        .stats {
+            display: flex;
+            justify-content: space-around;
+            font-weight: bold;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+
+        /* Roof grid 7x7 */
+        #roof {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 5px;
+            justify-content: center;
+            padding: 10px;
+            border-radius: 10px;
+
+            /* تصویر پشت بام */
+            background-image: url("roof_bg.png");
+            background-size: cover;
+            background-position: center;
+        }
+
+        .cell {
+            width: 45px;
+            height: 45px;
+            border-radius: 6px;
+            position: relative;
+            cursor: pointer;
+            box-sizing: border-box;
+
+            /* حالت پیش‌فرض (خالی) */
+            background-color: rgba(255, 255, 255, 0.25);
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: center;
+        }
+
+        /* پنل سالم */
+        .cell.panel {
+            background-image: url("panel_ok.png");
+            background-color: transparent; /* تا تصویر بهتر دیده شود */
+            border: none;
+        }
+
+        /* پنل شکسته */
+        .cell.broken {
+            background-image: url("panel_broken.png");
+            background-color: transparent;
+            border: none;
+        }
+
+        /* Kabby sprite درون سلول */
+        .kabby {
+            position: absolute;
+            width: 32px;
+            height: 32px;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            background-image: url("kabby.png");
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: center;
+            z-index: 10;
+        }
+
+        #message {
+            margin-top: 10px;
+            color: #e67e22;
+            font-weight: bold;
+            min-height: 40px;
+            padding: 0 5px;
+            font-size: 14px;
+            white-space: pre-line; /* برای نمایش \n در متن نهایی */
+        }
+
+        #controls {
+            margin-top: 8px;
+        }
+
+        #timer {
+            font-weight: bold;
+        }
+
+        button {
+            padding: 6px 12px;
+            margin: 4px;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+            background: #2ecc71;
+            color: #fff;
+            font-weight: bold;
+        }
+
+        button:hover {
+            background: #27ae60;
+        }
+
+        button:disabled {
+            background: #95a5a6;
+            cursor: default;
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <h2>Jazz & Kabby: Solar Roof Defense</h2>
+
+    <div class="stats">
+        <div>Score: <span id="score">0</span></div>
+        <div>Healthy Panels: <span id="health">0</span></div>
+        <div>Broken: <span id="broken">0</span></div>
+        <div>Time: <span id="timer">90</span>s</div>
+    </div>
+
+    <div id="roof"></div>
+
+    <div id="controls">
+        <button id="startBtn" onclick="startGame()">Start Game</button>
+    </div>
+
+    <div id="message">
+        Place solar panels with Jazz by tapping on empty cells.  
+        Kabby will try to break them. Keep enough panels working until time runs out!
+    </div>
+</div>
+
+<script>
+    const GRID_SIZE = 7;               // 7x7 grid
+    const TOTAL_CELLS = GRID_SIZE * GRID_SIZE; // 49
+    const GAME_DURATION = 90;          // seconds
+    const BROKEN_LIMIT = 15;           // if broken panels reach this → lose
+
+    let score = 0;
+    let healthyPanels = 0;
+    let brokenPanels = 0;
+    let timeLeft = GAME_DURATION;
+
+    // سرعت جدید Kabby
+    let attackSpeed = 1400;            // starting Kabby speed (ms) – تندتر از قبل
+    let kabbyTimer = null;
+    let gameTimer = null;
+    let gameOver = false;
+
+    const roof = document.getElementById("roof");
+    const scoreEl = document.getElementById("score");
+    const healthEl = document.getElementById("health");
+    const brokenEl = document.getElementById("broken");
+    const timerEl = document.getElementById("timer");
+    const messageEl = document.getElementById("message");
+    const startBtn = document.getElementById("startBtn");
+
+    // Build grid dynamically (7x7)
+    function buildGrid() {
+        roof.innerHTML = "";
+        for (let i = 0; i < TOTAL_CELLS; i++) {
+            const cell = document.createElement("div");
+            cell.className = "cell";
+            cell.dataset.index = i;
+            cell.addEventListener("click", () => installPanel(cell));
+            roof.appendChild(cell);
+        }
+    }
+
+    // Reset game variables
+    function resetGame() {
+        score = 0;
+        healthyPanels = 0;
+        brokenPanels = 0;
+        timeLeft = GAME_DURATION;
+        attackSpeed = 1400; // reset به سرعت شروع جدید
+        gameOver = false;
+
+        updateStats();
+        timerEl.textContent = timeLeft;
+        messageEl.textContent = 
+            "Place solar panels with Jazz by tapping on empty cells. Kabby will try to break them. Keep enough panels working until time runs out!";
+
+        // Clear timers
+        if (kabbyTimer) clearTimeout(kabbyTimer);
+        if (gameTimer) clearInterval(gameTimer);
+
+        // Reset grid classes
+        document.querySelectorAll(".cell").forEach(c => {
+            c.classList.remove("panel", "broken");
+            removeKabbyFromCell(c);
+        });
+    }
+
+    // Start game
+    function startGame() {
+        resetGame();
+        startBtn.disabled = true;
+
+        // Main Kabby attack loop
+        kabbyAttackLoop();
+
+        // Game timer (countdown)
+        gameTimer = setInterval(() => {
+            if (gameOver) return;
+            timeLeft--;
+            timerEl.textContent = timeLeft;
+            if (timeLeft <= 0) {
+                endGameByTime();
+            }
+        }, 1000);
+    }
+
+    // Install panel (tap by player)
+    function installPanel(cell) {
+        if (gameOver) return;
+
+        // اگر پنل شکسته بود و کاربر کلیک کرد → تعمیر/نصب مجدد
+        if (!cell.classList.contains("panel")) {
+            if (cell.classList.contains("broken")) {
+                brokenPanels = Math.max(0, brokenPanels - 1);
+                cell.classList.remove("broken");
+            }
+            cell.classList.add("panel");
+            healthyPanels++;
+            score += 10; // add score for installing
+
+            updateStats();
+        }
+    }
+
+    // Kabby attack loop
+    function kabbyAttackLoop() {
+        if (gameOver) return;
+
+        kabbyAttackOnce();
+
+        // افزایش سرعت Kabby با ضریب 0.94 و حداقل 450ms
+        attackSpeed = Math.max(450, attackSpeed * 0.94);
+        kabbyTimer = setTimeout(kabbyAttackLoop, attackSpeed);
+    }
+
+    // One Kabby attack
+    function kabbyAttackOnce() {
+        if (gameOver) return;
+
+        // انتخاب یک سلول تصادفی که پنل دارد
+        const panelCells = Array.from(document.querySelectorAll(".cell.panel"));
+        if (panelCells.length === 0) {
+            // اگر هیچ پنلی وجود نداشت، فعلاً حمله‌ای نمی‌شود
+            return;
+        }
+
+        const target = panelCells[Math.floor(Math.random() * panelCells.length)];
+
+        // نمایش Kabby در آن سلول
+        spawnKabbyInCell(target);
+
+        // بعد از یک تأخیر کوتاه، پنل را می‌شکند
+        setTimeout(() => {
+            if (gameOver) return;
+
+            target.classList.remove("panel");
+            target.classList.add("broken");
+            healthyPanels = Math.max(0, healthyPanels - 1);
+            brokenPanels++;
+            removeKabbyFromCell(target);
+
+            updateStats();
+            checkLoseCondition();
+        }, 700); // 0.7s attack animation
+    }
+
+    // Show Kabby sprite
+    function spawnKabbyInCell(cell) {
+        removeKabbyFromCell(cell);
+        const kabby = document.createElement("div");
+        kabby.className = "kabby";
+        cell.appendChild(kabby);
+    }
+
+    function removeKabbyFromCell(cell) {
+        const existing = cell.querySelector(".kabby");
+        if (existing) cell.removeChild(existing);
+    }
+
+    // Update score / stats UI
+    function updateStats() {
+        scoreEl.textContent = score;
+        healthEl.textContent = healthyPanels;
+        brokenEl.textContent = brokenPanels;
+    }
+
+    // Check lose condition
+    function checkLoseCondition() {
+        if (brokenPanels >= BROKEN_LIMIT) {
+            endGame("lose");
+        }
+    }
+
+    // Time finished → check win/lose by coverage
+    function endGameByTime() {
+        if (gameOver) return;
+
+        const coverage = (healthyPanels / TOTAL_CELLS) * 100;
+        let mode = "lose";
+        if (coverage >= 50) mode = "win";
+        if (coverage >= 80) mode = "great";
+
+        endGame(mode);
+    }
+
+    // Generic end game handler
+    function endGame(mode) {
+        gameOver = true;
+        startBtn.disabled = false;
+        clearInterval(gameTimer);
+        clearTimeout(kabbyTimer);
+
+        const coverage = Math.round((healthyPanels / TOTAL_CELLS) * 100);
+        let finalMessage = "";
+
+        if (mode === "lose") {
+            finalMessage =
+                "Kabby destroyed too many panels!\n" +
+                "Coverage: " + coverage + "%\n" +
+                "Try again to protect the school’s solar energy.";
+        } else if (mode === "win") {
+            score += healthyPanels * 2; // bonus points for surviving panels
+            updateStats();
+            finalMessage =
+                "Nice job, Jazz! You kept enough panels working.\n" +
+                "Coverage: " + coverage + "%\n" +
+                "Score bonus added for healthy panels.";
+        } else if (mode === "great") {
+            score += healthyPanels * 3; // bigger bonus
+            updateStats();
+            finalMessage =
+                "Amazing! Jazz turned the school roof into a solar powerhouse!\n" +
+                "Coverage: " + coverage + "%\n" +
+                "Big bonus for excellent solar coverage!";
+        }
+
+        messageEl.textContent = finalMessage;
+        // در نسخه‌ی تلگرامی بعداً اینجا امتیاز را به TelegramGameProxy.shareScore(score) می‌فرستیم
+    }
+
+    // Initial grid build
+    buildGrid();
+</script>
+
+</body>
+</html>
